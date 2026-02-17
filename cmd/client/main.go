@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+
 	"github.com/RussNavas/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/RussNavas/learn-pub-sub-starter/internal/pubsub"
 	"github.com/RussNavas/learn-pub-sub-starter/internal/routing"
-    amqp "github.com/rabbitmq/amqp091-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -25,19 +26,28 @@ func main() {
 		log.Fatalf("could not get username: %v", err)
 	}
 
-	_, queue, err := pubsub.DeclareAndBind(
-		conn,
-		routing.ExchangePerilDirect,
-		routing.PauseKey+"."+username,
-		routing.PauseKey,
-		pubsub.SimpleQueueTransient,
-	)
-	if err != nil {
-		log.Fatalf("could not subscribe to pause: %v", err)
-	}
-	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
 
 	gs := gamelogic.NewGameState(username)
+
+	pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilDirect,
+		"pause."+username,
+		routing.PauseKey,
+		pubsub.SimpleQueueTransient,
+		handlerPause(gs),
+	)
+
+	chann, _, err := pubsub.DeclareAndBind(
+		conn,
+		routing.ExchangePerilTopic,
+		"army_moves."+username,
+		"army_moves.*",
+		pubsub.SimpleQueueTransient,
+	)
+	if err != nil{
+		log.Fatalf("couldnt DeclareAndBind army_moves: %v", err)
+	}
 
 	for {
 		words := gamelogic.GetInput()
@@ -46,13 +56,27 @@ func main() {
 		}
 		switch words[0] {
 		case "move":
-			_, err := gs.CommandMove(words)
+			mv, err := gs.CommandMove(words)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
 
-			// TODO: publish the move
+			gs.HandleMove(mv)
+			defer fmt.Print("> ")
+
+			err = pubsub.PublishJSON(
+				chann,
+				routing.ExchangePerilTopic,
+				routing.ArmyMovesPrefix+"."+username,
+				mv, 
+			)
+			if err != nil {
+				fmt.Print(fmt.Errorf("problem publishing move to topic exchange: %w", err))
+			}
+			fmt.Printf("Move Succesful\n")
+
+
 		case "spawn":
 			err = gs.CommandSpawn(words)
 			if err != nil {
