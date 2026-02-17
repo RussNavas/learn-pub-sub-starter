@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-
+	"log"
 	"github.com/RussNavas/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/RussNavas/learn-pub-sub-starter/internal/pubsub"
 	"github.com/RussNavas/learn-pub-sub-starter/internal/routing"
@@ -27,6 +27,18 @@ func main() {
 	}
 
 	defer ch.Close()
+
+	_, queue, err := pubsub.DeclareAndBind(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.SimpleQueueDurable)
+
+	if err != nil {
+		log.Fatalf("could not subscribe to pause: %v", err)
+	}
+	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
 
 	gamelogic.PrintServerHelp()
 	
