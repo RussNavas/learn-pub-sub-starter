@@ -6,16 +6,26 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackRequeue
+	NackDiscard
+)
+
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
 	queueName,
 	key string,
 	queueType SimpleQueueType,
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 
-	channel, queue, err := DeclareAndBind(
+	ch, queue, err := DeclareAndBind(
 		conn,
 		exchange,
 		queueName,
@@ -27,7 +37,7 @@ func SubscribeJSON[T any](
 		return fmt.Errorf("DeclarAndBind failed: %v, Queue: %v", err, queue.Name)
 	}
 
-	msgs, err := channel.Consume(
+	msgs, err := ch.Consume(
 		queueName,
 		"",
 		false,
@@ -38,18 +48,29 @@ func SubscribeJSON[T any](
 	if err != nil{
 		return fmt.Errorf("unable to use channel.Consume: %v", err)
 	}
-
+	unmarshaller := func(data []byte) (T, error) {
+		var target T
+		err := json.Unmarshal(data, &target)
+		return target, err
+	}
 	go func(){
+		defer ch.Close()
 		for msg := range msgs {
-			var val T
-			err := json.Unmarshal(msg.Body, &val)
-			if err != nil{
-				fmt.Errorf("unable to unmarshal body: %v, channel: %v", err, msg)
+			target, err := unmarshaller(msg.Body)
+			if err != nil {
+				fmt.Printf("could not unmarshal message: %v\n", err)
+				continue
 			}
-			handler(val)
-			err = msg.Ack(true)
-			if err != nil{
-				fmt.Errorf("unable to Ack: %v", err)
+			switch handler(target) {
+			case Ack:
+				msg.Ack(false)
+				fmt.Println("Ack")
+			case NackDiscard:
+				msg.Nack(false, false)
+				fmt.Println("NackDiscard")
+			case NackRequeue:
+				msg.Nack(false, true)
+				fmt.Println("NackRequeue")
 			}
 		}
 	}()

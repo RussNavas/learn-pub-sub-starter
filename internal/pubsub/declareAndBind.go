@@ -25,41 +25,29 @@ func DeclareAndBind(
 		
 	}
 
-	isDurable := false
-	if queueType == SimpleQueueDurable{
-		isDurable = true
-	}
-
-	isAutoDelete := false
-	isExclusive := false
-	if queueType == SimpleQueueTransient{
-		isAutoDelete = true
-		isExclusive = true
-	}
-
-	q, err := channel.QueueDeclare(
-		queueName,
-		isDurable,
-		isAutoDelete,
-		isExclusive,
-		false,
-		nil)
-
+	queue, err := channel.QueueDeclare(
+		queueName,                       // name
+		queueType == SimpleQueueDurable, // durable
+		queueType != SimpleQueueDurable, // delete when unused
+		queueType != SimpleQueueDurable, // exclusive
+		false,                           // no-wait
+		amqp.Table{"x-dead-letter-exchange": "peril_dlx"},
+	)
 	if err != nil{
-		return channel, q, fmt.Errorf("problem with QueueDeclare: %v", err)
+		return channel, queue, fmt.Errorf("problem with QueueDeclare: %v", err)
 	}
 	
 	err = channel.QueueBind(
-		q.Name,
+		queue.Name,
 		key,
 		exchange,
 		false,
 		nil)
 
 	if err != nil{
-		return channel, q, fmt.Errorf("problem binding queue: %v", err)
+		return channel, queue, fmt.Errorf("problem binding queue: %v", err)
 	}
 
-	return channel, q, nil
+	return channel, queue, nil
 }
 
